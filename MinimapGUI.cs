@@ -5,7 +5,10 @@
 
 using BepInEx.Configuration;
 using GameNetcodeStuff;
+using LethalCompanyMinimap.Patches;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
@@ -42,6 +45,22 @@ namespace LethalCompanyMinimap.Component
         public bool showCompass;
         public bool showHeadCam;
         public bool freezePlayerIndex;
+        public bool hostOverride;
+        
+        private bool lastHostOverrideState = false;
+        private bool lastClientHostOverrideActive = false; // Track previous state of hostOverrideActive on client
+        
+        // Track last sent values to detect changes (host only)
+        private bool lastEnableMinimap;
+        private bool lastShowLoots, lastShowEnemies, lastShowTurrets, lastShowLivePlayers;
+        private bool lastShowDeadPlayers, lastShowRadarBoosters, lastShowTerminalCodes;
+        private bool lastShowShipArrow, lastShowCompass, lastShowHeadCam;
+        
+        // Store locked host values for enforcement (clients only)
+        private bool? lockedEnableMinimap;
+        private bool? lockedShowLoots, lockedShowEnemies, lockedShowTurrets, lockedShowLivePlayers;
+        private bool? lockedShowDeadPlayers, lockedShowRadarBoosters, lockedShowTerminalCodes;
+        private bool? lockedShowShipArrow, lockedShowCompass, lockedShowHeadCam;
 
         private string[] navbarStr = { "Minimap", "Icons", "Select Target", "Keybinds" };
         private readonly KeyboardShortcut escapeKey = new KeyboardShortcut(KeyCode.Escape);
@@ -56,7 +75,6 @@ namespace LethalCompanyMinimap.Component
         private Vector2 scrollPos = Vector2.zero;  // select target
         private int validTargetCount = 0;
         public IDictionary<PlayerControllerB, ModUser> modUsers;
-
         private GUIStyle menuStyle;
         private GUIStyle buttonStyle;
         private GUIStyle labelStyle;
@@ -71,7 +89,14 @@ namespace LethalCompanyMinimap.Component
             modUsers = new Dictionary<PlayerControllerB, ModUser>();
 
             guiKey.OnKey = ToggleGUI;
-            toggleMinimapKey.OnKey = () => { enableMinimap = !enableMinimap; };
+            toggleMinimapKey.OnKey = () => { 
+                // Only allow toggle if host or not using host override
+                bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+                if (isHost || MinimapMod.hostOverrideActive == null || !MinimapMod.hostOverrideActive.Value)
+                {
+                    enableMinimap = !enableMinimap;
+                }
+            };
             toggleOverrideKey.OnKey = () => { freezePlayerIndex = !freezePlayerIndex; };
             switchTargetKey.OnKey = SwitchTarget;
 
@@ -263,6 +288,305 @@ namespace LethalCompanyMinimap.Component
                 realPlayerIndex = CalculateValidTargetIndex(realPlayerIndex);
                 SetMinimapTarget(realPlayerIndex);
             }
+
+            // Enforce host settings FIRST (before any other code can modify them)
+            EnforceHostSettings();
+            
+            // Handle host override syncing
+            HandleHostOverrideSync();
+            
+            // Enforce host settings AGAIN (after syncing, before GUI)
+            EnforceHostSettings();
+        }
+
+        private void EnforceHostSettings()
+        {
+            // If we're a client using host override, continuously enforce the host settings
+            // This prevents any changes from hotkeys, GUI, or other code paths
+            bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+            if (!isHost && MinimapMod.hostOverrideActive != null && MinimapMod.hostOverrideActive.Value)
+            {
+                // ALWAYS force locked values - set them every frame regardless of current value
+                // This ensures no code path can change them, even temporarily
+                if (lockedEnableMinimap.HasValue)
+                {
+                    enableMinimap = lockedEnableMinimap.Value;
+                }
+                if (lockedShowLoots.HasValue)
+                {
+                    showLoots = lockedShowLoots.Value;
+                }
+                if (lockedShowEnemies.HasValue)
+                {
+                    showEnemies = lockedShowEnemies.Value;
+                }
+                if (lockedShowTurrets.HasValue)
+                {
+                    showTurrets = lockedShowTurrets.Value;
+                }
+                if (lockedShowLivePlayers.HasValue)
+                {
+                    showLivePlayers = lockedShowLivePlayers.Value;
+                }
+                if (lockedShowDeadPlayers.HasValue)
+                {
+                    showDeadPlayers = lockedShowDeadPlayers.Value;
+                }
+                if (lockedShowRadarBoosters.HasValue)
+                {
+                    showRadarBoosters = lockedShowRadarBoosters.Value;
+                }
+                if (lockedShowTerminalCodes.HasValue)
+                {
+                    showTerminalCodes = lockedShowTerminalCodes.Value;
+                }
+                if (lockedShowShipArrow.HasValue)
+                {
+                    showShipArrow = lockedShowShipArrow.Value;
+                }
+                if (lockedShowCompass.HasValue)
+                {
+                    showCompass = lockedShowCompass.Value;
+                }
+                if (lockedShowHeadCam.HasValue)
+                {
+                    showHeadCam = lockedShowHeadCam.Value;
+                }
+            }
+        }
+
+        private void HandleHostOverrideSync()
+        {
+            bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+            
+            if (isHost)
+            {
+                // Host: Check if hostOverride state changed
+                if (hostOverride != lastHostOverrideState)
+                {
+                    lastHostOverrideState = hostOverride;
+                    if (hostOverride)
+                    {
+                        // Initialize tracking values
+                        UpdateLastToggleValues();
+                        // Send initial settings
+                        SendHostSettingsToClients();
+                    }
+                    else
+                    {
+                        // Host disabled hostOverride - tell clients to restore
+                        HUDManagerPatch.SendMinimapBroadcast("HostOverrideDisabled", "restore");
+                    }
+                }
+
+                // Host: If hostOverride is enabled, check if any toggle changed and send update
+                if (hostOverride && HasToggleSettingsChanged())
+                {
+                    SendHostSettingsToClients();
+                    UpdateLastToggleValues();
+                }
+            }
+            else
+            {
+                // Client: Check if hostOverrideActive transitioned from true to false (host disabled override)
+                if (MinimapMod.hostOverrideActive != null)
+                {
+                    bool currentHostOverrideActive = MinimapMod.hostOverrideActive.Value;
+                    // Only restore if it transitioned from true to false
+                    if (lastClientHostOverrideActive && !currentHostOverrideActive)
+                    {
+                        RestoreFromConfig();
+                    }
+                    lastClientHostOverrideActive = currentHostOverrideActive;
+                }
+                lastHostOverrideState = false;
+            }
+        }
+
+        private void UpdateLastToggleValues()
+        {
+            lastEnableMinimap = enableMinimap;
+            lastShowLoots = showLoots;
+            lastShowEnemies = showEnemies;
+            lastShowTurrets = showTurrets;
+            lastShowLivePlayers = showLivePlayers;
+            lastShowDeadPlayers = showDeadPlayers;
+            lastShowRadarBoosters = showRadarBoosters;
+            lastShowTerminalCodes = showTerminalCodes;
+            lastShowShipArrow = showShipArrow;
+            lastShowCompass = showCompass;
+            lastShowHeadCam = showHeadCam;
+        }
+
+        private bool HasToggleSettingsChanged()
+        {
+            return lastEnableMinimap != enableMinimap ||
+                   lastShowLoots != showLoots ||
+                   lastShowEnemies != showEnemies ||
+                   lastShowTurrets != showTurrets ||
+                   lastShowLivePlayers != showLivePlayers ||
+                   lastShowDeadPlayers != showDeadPlayers ||
+                   lastShowRadarBoosters != showRadarBoosters ||
+                   lastShowTerminalCodes != showTerminalCodes ||
+                   lastShowShipArrow != showShipArrow ||
+                   lastShowCompass != showCompass ||
+                   lastShowHeadCam != showHeadCam;
+        }
+
+        public void SendHostSettingsToClients()
+        {
+            string settingsData = SerializeToggleSettings();
+            HUDManagerPatch.SendMinimapBroadcast("HostOverrideSettings", settingsData);
+        }
+
+        private string SerializeToggleSettings()
+        {
+            return $"enableMinimap={(enableMinimap ? "show" : "hide")};" +
+                   $"loots={(showLoots ? "show" : "hide")};" +
+                   $"enemies={(showEnemies ? "show" : "hide")};" +
+                   $"turrets={(showTurrets ? "show" : "hide")};" +
+                   $"livePlayers={(showLivePlayers ? "show" : "hide")};" +
+                   $"deadPlayers={(showDeadPlayers ? "show" : "hide")};" +
+                   $"radarBoosters={(showRadarBoosters ? "show" : "hide")};" +
+                   $"terminalCodes={(showTerminalCodes ? "show" : "hide")};" +
+                   $"shipArrow={(showShipArrow ? "show" : "hide")};" +
+                   $"compass={(showCompass ? "show" : "hide")};" +
+                   $"headCam={(showHeadCam ? "show" : "hide")}";
+        }
+
+        public void ApplyHostSettings(string settingsData)
+        {
+            // Only apply if we're not the host
+            bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+            if (isHost) return;
+
+            // Mark that we're using host override and save to config
+            if (MinimapMod.hostOverrideActive != null)
+            {
+                // Update the tracking variable before setting the value
+                lastClientHostOverrideActive = MinimapMod.hostOverrideActive.Value;
+                MinimapMod.hostOverrideActive.Value = true;
+                
+                if (MinimapMod.Config != null)
+                {
+                    try
+                    {
+                        MinimapMod.Config.Save();
+                    }
+                    catch (System.Exception e)
+                    {
+                        MinimapMod.mls.LogError($"Error saving config: {e.Message}");
+                    }
+                }
+                else
+                {
+                    MinimapMod.mls.LogError("Config is null! Cannot save hostOverrideActive.");
+                }
+            }
+            else
+            {
+                MinimapMod.mls.LogError("hostOverrideActive config entry is null! Cannot set value.");
+            }
+
+            // Parse and apply host settings (temporarily, won't save to config)
+            string[] settings = settingsData.Split(';');
+            foreach (string setting in settings)
+            {
+                string[] parts = setting.Split('=');
+                if (parts.Length != 2) continue;
+
+                string key = parts[0].Trim();
+                bool value = parts[1].Trim() == "show";
+
+                switch (key)
+                {
+                    case "enableMinimap":
+                        enableMinimap = value;
+                        lockedEnableMinimap = value; // Lock this value
+                        break;
+                    case "loots":
+                        showLoots = value;
+                        lockedShowLoots = value; // Lock this value
+                        break;
+                    case "enemies":
+                        showEnemies = value;
+                        lockedShowEnemies = value; // Lock this value
+                        break;
+                    case "turrets":
+                        showTurrets = value;
+                        lockedShowTurrets = value; // Lock this value
+                        break;
+                    case "livePlayers":
+                        showLivePlayers = value;
+                        lockedShowLivePlayers = value; // Lock this value
+                        break;
+                    case "deadPlayers":
+                        showDeadPlayers = value;
+                        lockedShowDeadPlayers = value; // Lock this value
+                        break;
+                    case "radarBoosters":
+                        showRadarBoosters = value;
+                        lockedShowRadarBoosters = value; // Lock this value
+                        break;
+                    case "terminalCodes":
+                        showTerminalCodes = value;
+                        lockedShowTerminalCodes = value; // Lock this value
+                        break;
+                    case "shipArrow":
+                        showShipArrow = value;
+                        lockedShowShipArrow = value; // Lock this value
+                        break;
+                    case "compass":
+                        showCompass = value;
+                        lockedShowCompass = value; // Lock this value
+                        break;
+                    case "headCam":
+                        showHeadCam = value;
+                        lockedShowHeadCam = value; // Lock this value
+                        break;
+                }
+            }
+            
+            // Immediately enforce to ensure values are locked
+            EnforceHostSettings();
+        }
+
+        public void RestoreFromConfig()
+        {
+            // Clear locked values
+            lockedEnableMinimap = null;
+            lockedShowLoots = null;
+            lockedShowEnemies = null;
+            lockedShowTurrets = null;
+            lockedShowLivePlayers = null;
+            lockedShowDeadPlayers = null;
+            lockedShowRadarBoosters = null;
+            lockedShowTerminalCodes = null;
+            lockedShowShipArrow = null;
+            lockedShowCompass = null;
+            lockedShowHeadCam = null;
+            
+            // Set host override to false and save
+            if (MinimapMod.hostOverrideActive != null)
+            {
+                MinimapMod.hostOverrideActive.Value = false;
+                if (MinimapMod.Config != null)
+                {
+                    MinimapMod.Config.Save();
+                    MinimapMod.mls.LogInfo($"Set hostOverrideActive to false and saved config. Current value: {MinimapMod.hostOverrideActive.Value}");
+                }
+                else
+                {
+                    MinimapMod.mls.LogError("Config is null! Cannot save hostOverrideActive.");
+                }
+            }
+            else
+            {
+                MinimapMod.mls.LogError("hostOverrideActive config entry is null! Cannot set value.");
+            }
+            
+            // Restore from config file (this won't save, just loads existing values)
+            MinimapMod.Instance.SyncGUIFromConfigs();
         }
 
         private static MouseAndKeyboard MouseWasPressedThisFrame()
@@ -308,6 +632,7 @@ namespace LethalCompanyMinimap.Component
 
             if (isGUIOpen)
             {
+                
                 float guiXpos = (Screen.width / 2) - (GUI_WIDTH / 2);
                 float guiYpos = (Screen.height / 2) - (GUI_HEIGHT / 2);
                 float guiCenterX = guiXpos + ((GUI_WIDTH / 2) - (ITEMWIDTH / 2));
@@ -321,7 +646,23 @@ namespace LethalCompanyMinimap.Component
                 switch (navbarIndex)
                 {
                     case 0:
+                        bool isHostTab0 = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+                        bool shouldDisableTogglesTab0 = !isHostTab0 && MinimapMod.hostOverrideActive != null && MinimapMod.hostOverrideActive.Value;
+                        
+                        // Store old value to prevent changes when disabled
+                        bool oldEnableMinimap = enableMinimap;
+                        
+                        // Disable toggle when host override is active for non-hosts
+                        GUI.enabled = !shouldDisableTogglesTab0;
                         enableMinimap = GUI.Toggle(new Rect(guiCenterX, guiYpos + 90, ITEMWIDTH, 30), enableMinimap, "Toggle Minimap", toggleStyle);
+                        
+                        // If disabled, restore old value to prevent changes
+                        if (shouldDisableTogglesTab0)
+                        {
+                            enableMinimap = oldEnableMinimap;
+                        }
+                        
+                        GUI.enabled = true; // Re-enable for other controls (sliders, buttons, etc. are not affected by host override)
 
                         autoRotate = GUI.Toggle(new Rect(guiCenterX, guiYpos + 130, ITEMWIDTH, 30), autoRotate, "Auto Rotate Map", toggleStyle);
 
@@ -359,6 +700,24 @@ namespace LethalCompanyMinimap.Component
                         }
                         break;
                     case 1:
+                        bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost; // Check if user is host
+                        // Disable all toggles for non-host users when host override is active
+                        bool shouldDisableToggles = !isHost && MinimapMod.hostOverrideActive != null && MinimapMod.hostOverrideActive.Value;
+                        
+                        // Store old values to prevent changes when disabled
+                        bool oldShowLoots = showLoots;
+                        bool oldShowEnemies = showEnemies;
+                        bool oldShowTurrets = showTurrets;
+                        bool oldShowLivePlayers = showLivePlayers;
+                        bool oldShowDeadPlayers = showDeadPlayers;
+                        bool oldShowRadarBoosters = showRadarBoosters;
+                        bool oldShowTerminalCodes = showTerminalCodes;
+                        bool oldShowShipArrow = showShipArrow;
+                        bool oldShowCompass = showCompass;
+                        bool oldShowHeadCam = showHeadCam;
+                        
+                        // Disable all icon toggles when host override is active
+                        GUI.enabled = !shouldDisableToggles;
                         showLoots = GUI.Toggle(new Rect(guiCenterX, guiYpos + 90, ITEMWIDTH, 30), showLoots, "Show Loots", toggleStyle);
                         showEnemies = GUI.Toggle(new Rect(guiCenterX, guiYpos + 130, ITEMWIDTH, 30), showEnemies, "Show Enemies", toggleStyle);
                         showTurrets = GUI.Toggle(new Rect(guiCenterX, guiYpos + 170, ITEMWIDTH, 30), showTurrets, "Show Turrets", toggleStyle);
@@ -369,7 +728,29 @@ namespace LethalCompanyMinimap.Component
                         showShipArrow = GUI.Toggle(new Rect(guiCenterX, guiYpos + 370, ITEMWIDTH, 30), showShipArrow, "Show Ship Arrow", toggleStyle);
                         showCompass = GUI.Toggle(new Rect(guiCenterX, guiYpos + 410, ITEMWIDTH, 30), showCompass, "Show Compass", toggleStyle);
                         showHeadCam = GUI.Toggle(new Rect(guiCenterX, guiYpos + 450, ITEMWIDTH, 30), showHeadCam, "Show Head Camera", toggleStyle);
-                        if (LeftClickButton(new Rect(guiCenterX, guiYpos + 510, ITEMWIDTH, 30), "Show all Icons"))
+                        
+                        // If disabled, restore old values to prevent changes
+                        if (shouldDisableToggles)
+                        {
+                            showLoots = oldShowLoots;
+                            showEnemies = oldShowEnemies;
+                            showTurrets = oldShowTurrets;
+                            showLivePlayers = oldShowLivePlayers;
+                            showDeadPlayers = oldShowDeadPlayers;
+                            showRadarBoosters = oldShowRadarBoosters;
+                            showTerminalCodes = oldShowTerminalCodes;
+                            showShipArrow = oldShowShipArrow;
+                            showCompass = oldShowCompass;
+                            showHeadCam = oldShowHeadCam;
+                        }
+                        
+                        GUI.enabled = isHost; // Disable HostOverride toggle if user is not host
+                        hostOverride = GUI.Toggle(new Rect(guiCenterX, guiYpos + 490, ITEMWIDTH, 30), hostOverride, "Host Override", toggleStyle);
+                        GUI.enabled = true; // Re-enable for other controls
+                        
+                        // Disable buttons for non-host users when host override is active
+                        GUI.enabled = !shouldDisableToggles;
+                        if (LeftClickButton(new Rect(guiCenterX, guiYpos + 530, ITEMWIDTH, 30), "Show all Icons"))
                         {
                             showLoots = true;
                             showEnemies = true;
@@ -382,7 +763,7 @@ namespace LethalCompanyMinimap.Component
                             showCompass = true;
                             showHeadCam = true;
                         }
-                        if (LeftClickButton(new Rect(guiCenterX, guiYpos + 550, ITEMWIDTH, 30), "Hide all Icons"))
+                        if (LeftClickButton(new Rect(guiCenterX, guiYpos + 570, ITEMWIDTH, 30), "Hide all Icons"))
                         {
                             showLoots = false;
                             showEnemies = false;
@@ -395,6 +776,7 @@ namespace LethalCompanyMinimap.Component
                             showCompass = false;
                             showHeadCam = false;
                         }
+                        GUI.enabled = true; // Re-enable for other controls
                         break;
                     case 2:
                         List<TransformAndName> players = StartOfRound.Instance != null ? StartOfRound.Instance.mapScreen.radarTargets : new List<TransformAndName>();
@@ -481,6 +863,9 @@ namespace LethalCompanyMinimap.Component
                 }
 
                 MinimapMod.Instance.SyncConfigFromGUI();
+                
+                // Enforce host settings immediately after GUI interactions
+                EnforceHostSettings();
             }
         }
 

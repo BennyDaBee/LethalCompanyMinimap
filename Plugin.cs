@@ -10,6 +10,7 @@ using HarmonyLib;
 using LethalCompanyMinimap.Component;
 using LethalCompanyMinimap.Patches;
 using UnityEngine;
+using System.Collections;
 
 namespace LethalCompanyMinimap
 {
@@ -54,11 +55,13 @@ namespace LethalCompanyMinimap
         private static ConfigEntry<bool> showCompassConfig;
         private static ConfigEntry<bool> showHeadCamConfig;
         private static ConfigEntry<bool> freezePlayerIndexConfig;
+        public static ConfigEntry<bool> hostOverrideActive;
 
         public static MinimapMod Instance;
         public static ManualLogSource mls;
         private readonly Harmony harmony = new Harmony(modGUID);
         public static MinimapGUI minimapGUI;
+        public static ConfigFile Config;
 
         void Awake()
         {
@@ -67,6 +70,7 @@ namespace LethalCompanyMinimap
                 Instance = this;
             }
 
+            Config = base.Config;
             mls = BepInEx.Logging.Logger.CreateLogSource(modGUID);
             mls.LogInfo($"{modName} {modVersion} loaded!");
 
@@ -97,6 +101,8 @@ namespace LethalCompanyMinimap
             // Sync Configuration file and Mod GUI
             SetBindings();
             SyncGUIFromConfigs();
+
+            
         }
 
         private void SetBindings()
@@ -123,32 +129,47 @@ namespace LethalCompanyMinimap
             showCompassConfig = Config.Bind("Minimap Icons", "Show Compass", true, "Toggles visibility of the compass on on your Minimap");
             showHeadCamConfig = Config.Bind("Minimap Icons", "Show Head Camera", true, "Toggles visibility of the head-mounted camera on your Minimap");
             freezePlayerIndexConfig = Config.Bind("Advance Settings", "Override Ship Controls", false, "Disables the ability to change the Minimap focus through the ship control panel, allowing Minimap focus changes only through the mod menu");
+            hostOverrideActive = Config.Bind("Host Override", "Host Override Active", false, "Indicates if host override is currently active (managed by the mod, do not edit manually)");
+            
+            // Reset to false on startup so users aren't locked out from previous sessions
+            // It will be set to true when host override is enabled, and false when disabled
+            hostOverrideActive.Value = false;
+            Config.Save();
         }
 
         public void SyncGUIFromConfigs()
         {
+            if (minimapGUI == null) return;
+
             minimapGUI.guiKey.Key = guiKeyConfig.Value;
             minimapGUI.toggleMinimapKey.Key = toggleMinimapKeyConfig.Value;
             minimapGUI.toggleOverrideKey.Key = toggleOverrideKeyConfig.Value;
             minimapGUI.switchTargetKey.Key = switchTargetKeyConfig.Value;
-            minimapGUI.enableMinimap = enableMinimapConfig.Value;
             minimapGUI.autoRotate = autoRotateConfig.Value;
             minimapGUI.minimapSize = minimapSizeConfig.Value;
             minimapGUI.minimapXPos = minimapXPosConfig.Value;
             minimapGUI.minimapYPos = minimapYPosConfig.Value;
             minimapGUI.minimapZoom = minimapZoomConfig.Value;
             minimapGUI.brightness = brightnessConfig.Value;
-            minimapGUI.showLoots = showLootsConfig.Value;
-            minimapGUI.showEnemies = showEnemiesConfig.Value;
-            minimapGUI.showTurrets = showTurretsConfig.Value;
-            minimapGUI.showLivePlayers = showLivePlayersConfig.Value;
-            minimapGUI.showDeadPlayers = showDeadPlayersConfig.Value;
-            minimapGUI.showRadarBoosters = showRadarBoostersConfig.Value;
-            minimapGUI.showTerminalCodes = showTerminalCodesConfig.Value;
-            minimapGUI.showShipArrow = showShipArrowConfig.Value;
-            minimapGUI.showCompass = showCompassConfig.Value;
-            minimapGUI.showHeadCam = showHeadCamConfig.Value;
             minimapGUI.freezePlayerIndex = freezePlayerIndexConfig.Value;
+
+            // Only load toggle settings from config if not using host override
+            // This prevents overwriting host settings when RestoreFromConfig is called
+            bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+            if (isHost || hostOverrideActive == null || !hostOverrideActive.Value)
+            {
+                minimapGUI.enableMinimap = enableMinimapConfig.Value;
+                minimapGUI.showLoots = showLootsConfig.Value;
+                minimapGUI.showEnemies = showEnemiesConfig.Value;
+                minimapGUI.showTurrets = showTurretsConfig.Value;
+                minimapGUI.showLivePlayers = showLivePlayersConfig.Value;
+                minimapGUI.showDeadPlayers = showDeadPlayersConfig.Value;
+                minimapGUI.showRadarBoosters = showRadarBoostersConfig.Value;
+                minimapGUI.showTerminalCodes = showTerminalCodesConfig.Value;
+                minimapGUI.showShipArrow = showShipArrowConfig.Value;
+                minimapGUI.showCompass = showCompassConfig.Value;
+                minimapGUI.showHeadCam = showHeadCamConfig.Value;
+            }
         }
 
         public void SyncConfigFromGUI()
@@ -157,24 +178,39 @@ namespace LethalCompanyMinimap
             toggleMinimapKeyConfig.Value = minimapGUI.toggleMinimapKey.Key;
             toggleOverrideKeyConfig.Value = minimapGUI.toggleOverrideKey.Key;
             switchTargetKeyConfig.Value = minimapGUI.switchTargetKey.Key;
-            enableMinimapConfig.Value = minimapGUI.enableMinimap;
             autoRotateConfig.Value = minimapGUI.autoRotate;
             minimapSizeConfig.Value = minimapGUI.minimapSize;
             minimapXPosConfig.Value = minimapGUI.minimapXPos;
             minimapYPosConfig.Value = minimapGUI.minimapYPos;
             minimapZoomConfig.Value = minimapGUI.minimapZoom;
             brightnessConfig.Value = minimapGUI.brightness;
-            showLootsConfig.Value = minimapGUI.showLoots;
-            showEnemiesConfig.Value = minimapGUI.showEnemies;
-            showTurretsConfig.Value = minimapGUI.showTurrets;
-            showLivePlayersConfig.Value = minimapGUI.showLivePlayers;
-            showDeadPlayersConfig.Value = minimapGUI.showDeadPlayers;
-            showRadarBoostersConfig.Value = minimapGUI.showRadarBoosters;
-            showTerminalCodesConfig.Value = minimapGUI.showTerminalCodes;
-            showShipArrowConfig.Value = minimapGUI.showShipArrow;
-            showCompassConfig.Value = minimapGUI.showCompass;
-            showHeadCamConfig.Value = minimapGUI.showHeadCam;
+
+            bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+            // Only save toggle settings if host or not using host override (to preserve client's local settings)
+            if (isHost || !hostOverrideActive.Value)
+            {
+                enableMinimapConfig.Value = minimapGUI.enableMinimap;
+                showLootsConfig.Value = minimapGUI.showLoots;
+                showEnemiesConfig.Value = minimapGUI.showEnemies;
+                showTurretsConfig.Value = minimapGUI.showTurrets;
+                showLivePlayersConfig.Value = minimapGUI.showLivePlayers;
+                showDeadPlayersConfig.Value = minimapGUI.showDeadPlayers;
+                showRadarBoostersConfig.Value = minimapGUI.showRadarBoosters;
+                showTerminalCodesConfig.Value = minimapGUI.showTerminalCodes;
+                showShipArrowConfig.Value = minimapGUI.showShipArrow;
+                showCompassConfig.Value = minimapGUI.showCompass;
+                showHeadCamConfig.Value = minimapGUI.showHeadCam;
+            }
+
             freezePlayerIndexConfig.Value = minimapGUI.freezePlayerIndex;
+        }
+        public static IEnumerator SendSettingsToNewPlayerDelayed()
+        {
+            yield return new WaitForSeconds(0.5f);
+            if (minimapGUI != null && minimapGUI.hostOverride)
+            {
+                minimapGUI.SendHostSettingsToClients();
+            }
         }
     }
 }
