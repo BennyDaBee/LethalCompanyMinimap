@@ -1,5 +1,7 @@
 # Lethal Company Minimap
 
+This mod was started by Tyzeron and continued by BennyTheBee with explicit permission from Tyzeron
+
 Introducing a **Minimap mod** for Lethal Company, a dynamic solution designed 
 to enhance your gaming experience. This mod seamlessly integrates a persistent 
 minimap on your screen, ensuring that you're never left in the dark, whether 
@@ -67,6 +69,9 @@ mod installed.
     - Loots, Enemies, Turrets, Alived Players, Dead Players, Terminal Codes, 
 Radar Boosters, Ship Arrow, Compass, and the Head Camera
 - Informs if the mod is outdated and a newer version is available
+Host Menu For Overrides and Cheat Compliance
+- Allows the Host to force mini map settings for all people in the lobby
+- Can disable the map, force toggles, and other settings
 
 ![Minimap GUI](Images/minimap-gui.png)
 
@@ -88,25 +93,9 @@ Radar Boosters, Ship Arrow, Compass, and the Head Camera
 6. Launch the **Lethal Comanpy** game and enjoy your new Minimap mod :)
 
 
-# Dev Notes
-
-This Minimap mod was a **weekend project**, so the code might be a little messy 
-due to the rapid development focus. In line with Donald Knuth's philosophy that 
-`early optimization is the root of all evil`, the initial aim was functionality 
-rather than optimization.
-
-Your feedback for improving and optimizing the code is warmly welcomed.
-
-
 # Contact
 
-I am primarily active on Discord, but my **DMs are closed**. The most effective 
-way to get in touch with me is via a Discord Server **support ticket**.
+You can message me on discord or on X. 
 
 To find the most up-to-date invite link to the Discord server, please visit my 
-**Twitter/X** profile: [@Tyzeron](https://x.com/tyzeron).
-
-I serve as a `System Administrator` on the Discord server and am highly active 
-there. I have decided to take this approach as it allows me to keep my focus on 
-mod development, without the added responsibility of owning and maintaining my 
-own Discord server.
+**Twitter/X** profile: [@BennyTheBeeYT](https://x.com/bennythebeeyt).
