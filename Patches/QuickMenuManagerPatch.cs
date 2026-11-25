@@ -17,6 +17,8 @@ namespace LethalCompanyMinimap.Patches
         static void FreezeWhenOpenedGUIPatch(ref bool ___isMenuOpen)
         {
             // Ensure that we cannot look around when our GUI is opened or when the game QuickMenu is opened
+            if (MinimapMod.minimapGUI == null) return;
+            
             bool expectedIsMenuOpen = MinimapMod.minimapGUI.isGUIOpen || isRealMenuOpen;
             if (___isMenuOpen != expectedIsMenuOpen)
             {

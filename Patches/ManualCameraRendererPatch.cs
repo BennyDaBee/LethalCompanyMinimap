@@ -23,7 +23,7 @@ namespace LethalCompanyMinimap.Patches
             ref Transform ___shipArrowPointer, GameObject ___shipArrowUI,
             ref Image ___compassRose, ref bool ___enableHeadMountedCam)
         {
-            if (___mapCamera != null)
+            if (___mapCamera != null && MinimapMod.minimapGUI != null)
             {
                 // Ensure that the Map camera is always being updated even when outside the ship
                 ___mapCamera.enabled = true;
@@ -81,7 +81,7 @@ namespace LethalCompanyMinimap.Patches
             }
             */
 
-            if (___shipArrowPointer != null && ___shipArrowUI != null && ___targetedPlayer != null)
+            if (___shipArrowPointer != null && ___shipArrowUI != null && ___targetedPlayer != null && MinimapMod.minimapGUI != null)
             {
                 // Handle and toggle the arrow pointing to the ship based on the user's mod settings
                 if (MinimapMod.minimapGUI.showShipArrow && !___targetedPlayer.isInsideFactory
@@ -101,7 +101,7 @@ namespace LethalCompanyMinimap.Patches
                 }
             }
 
-            if (___compassRose != null)
+            if (___compassRose != null && MinimapMod.minimapGUI != null)
             {
                 // Toggle the compass icon based on the user's mod settings
                 if (!StartOfRound.Instance.inShipPhase)
@@ -117,7 +117,7 @@ namespace LethalCompanyMinimap.Patches
                 }
             }
 
-            if (!StartOfRound.Instance.inShipPhase && MinimapMod.minimapGUI.showHeadCam != ___enableHeadMountedCam)
+            if (MinimapMod.minimapGUI != null && !StartOfRound.Instance.inShipPhase && MinimapMod.minimapGUI.showHeadCam != ___enableHeadMountedCam)
             {
                 // Toggle the target player's head-mounted camera based on the user's mod settings
                 ___enableHeadMountedCam = MinimapMod.minimapGUI.showHeadCam;
@@ -132,7 +132,7 @@ namespace LethalCompanyMinimap.Patches
         [HarmonyPostfix]
         static void HideHeadCamPlaceholderPatch(ref Image ___localPlayerPlaceholder)
         {
-            if (___localPlayerPlaceholder != null)
+            if (___localPlayerPlaceholder != null && MinimapMod.minimapGUI != null)
             {
                 // Hide the head-mounted camera placeholder image if the user set it in the mod settings
                 if (MinimapMod.minimapGUI.showHeadCam == false && ___localPlayerPlaceholder.enabled == true)
@@ -146,6 +146,8 @@ namespace LethalCompanyMinimap.Patches
         [HarmonyPrefix]
         static bool RadarMapSwitchTargetPatch(int setRadarTargetIndex, ref int ___targetTransformIndex, ref IEnumerator __result)
         {
+            if (MinimapMod.minimapGUI == null) return true;
+            
             MinimapMod.minimapGUI.realPlayerIndex = setRadarTargetIndex;
 
             // We don't run updateMapTarget if freezePlayerIndex setting is True
@@ -169,7 +171,7 @@ namespace LethalCompanyMinimap.Patches
         static void RemoveTargetFromMapPatch()
         {
             // We need to manually switch to next target because of our RadarMapSwitchTargetPatch
-            if (MinimapMod.minimapGUI.freezePlayerIndex == true)
+            if (MinimapMod.minimapGUI != null && MinimapMod.minimapGUI.freezePlayerIndex == true)
             {
                 MinimapMod.minimapGUI.SwitchTarget();
             }
@@ -180,7 +182,7 @@ namespace LethalCompanyMinimap.Patches
         static bool DontSwitchTargetForwardPatch()
         {
             // Dont switch radar target if freezePlayerIndex setting is True
-            if (MinimapMod.minimapGUI.freezePlayerIndex == true)
+            if (MinimapMod.minimapGUI != null && MinimapMod.minimapGUI.freezePlayerIndex == true)
             {
                 return false;
             }

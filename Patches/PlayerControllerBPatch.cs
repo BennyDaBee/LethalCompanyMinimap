@@ -41,6 +41,15 @@ namespace LethalCompanyMinimap.Patches
                 HUDManagerPatch.SendClientMessage(message);
             }
 
+            if (MinimapMod.minimapGUI == null) return;
+
+            bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
+            if (isHost && MinimapMod.minimapGUI.hostOverride)
+            {
+                // Small delay to ensure player is fully connected
+                MinimapMod.Instance.StartCoroutine(MinimapMod.SendSettingsToNewPlayerDelayed());
+            }
+
             // Get the Minimap size from the settings
             int size = MinimapMod.minimapGUI.minimapSize;
 
@@ -100,10 +109,15 @@ namespace LethalCompanyMinimap.Patches
         [HarmonyPostfix]
         static void UpdateMinimapPatch(PlayerControllerB __instance)
         {
+            if (MinimapMod.minimapGUI == null) return;
+
             // Toggle player visibility based on user's Minimap settings
-            if (MinimapMod.minimapGUI.showLivePlayers != __instance.mapRadarDotAnimator.gameObject.activeSelf)
+            if (__instance.mapRadarDotAnimator != null && __instance.mapRadarDotAnimator.gameObject != null)
             {
-                __instance.mapRadarDotAnimator.gameObject.SetActive(MinimapMod.minimapGUI.showLivePlayers);
+                if (MinimapMod.minimapGUI.showLivePlayers != __instance.mapRadarDotAnimator.gameObject.activeSelf)
+                {
+                    __instance.mapRadarDotAnimator.gameObject.SetActive(MinimapMod.minimapGUI.showLivePlayers);
+                }
             }
 
             // Minimap stuff
@@ -113,11 +127,11 @@ namespace LethalCompanyMinimap.Patches
                 if (MinimapMod.minimapGUI.enableMinimap != minimap.gameObject.activeSelf)
                 {
                     minimap.gameObject.SetActive(MinimapMod.minimapGUI.enableMinimap);
-                    if (MinimapMod.minimapGUI.enableMinimap)
+                    if (MinimapMod.minimapGUI.enableMinimap && tooltips != null)
                     {
                         tooltips.anchoredPosition -= new Vector2(0, MinimapMod.minimapGUI.minimapSize);
                     }
-                    else
+                    else if (tooltips != null)
                     {
                         tooltips.anchoredPosition = tooltipsOriginalPos;
                     }
@@ -127,7 +141,10 @@ namespace LethalCompanyMinimap.Patches
                 {
                     int size = MinimapMod.minimapGUI.minimapSize;
                     minimap.rectTransform.sizeDelta = new Vector2(size, size);
-                    tooltips.anchoredPosition = tooltipsOriginalPos - new Vector2(0, size);
+                    if (tooltips != null)
+                    {
+                        tooltips.anchoredPosition = tooltipsOriginalPos - new Vector2(0, size);
+                    }
                 }
                 // Move Minimap
                 if (MinimapMod.minimapGUI.minimapXPos != minimap.rectTransform.anchoredPosition.x
