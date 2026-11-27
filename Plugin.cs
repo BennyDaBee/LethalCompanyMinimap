@@ -10,7 +10,6 @@ using HarmonyLib;
 using LethalCompanyMinimap.Component;
 using LethalCompanyMinimap.Patches;
 using UnityEngine;
-using System.Collections;
 
 namespace LethalCompanyMinimap
 {
@@ -21,7 +20,6 @@ namespace LethalCompanyMinimap
         public const string modName = "Minimap";
         public const string modVersion = "1.0.6";
         public const string modAuthor = "Tyzeron";
-        public const string modRepository = "tyzeron/LethalCompanyMinimap";
 
         public static MouseAndKeyboard defaultGuiKey = MouseAndKeyboard.F1;
         public static MouseAndKeyboard defaultToggleMinimapKey = MouseAndKeyboard.F2;
@@ -74,9 +72,6 @@ namespace LethalCompanyMinimap
             mls = BepInEx.Logging.Logger.CreateLogSource(modGUID);
             mls.LogInfo($"{modName} {modVersion} loaded!");
 
-            // Start the Task of getting the latest version
-            _ = VersionChecker.GetLatestVersionAsync();
-
             // Patching stuff
             harmony.PatchAll(typeof(ManualCameraRendererPatch));
             harmony.PatchAll(typeof(QuickMenuManagerPatch));
@@ -87,6 +82,7 @@ namespace LethalCompanyMinimap
             harmony.PatchAll(typeof(PlayerControllerBPatch));
             harmony.PatchAll(typeof(RadarBoosterItemPatch));
             harmony.PatchAll(typeof(HUDManagerPatch));
+            harmony.PatchAll(typeof(GameNetworkManagerPatch));
             harmony.PatchAll(typeof(TimeOfDayPatch));
             harmony.PatchAll(typeof(DeadBodyInfoPatch));
             harmony.PatchAll(typeof(TurretPatch));
@@ -203,14 +199,6 @@ namespace LethalCompanyMinimap
             }
 
             freezePlayerIndexConfig.Value = minimapGUI.freezePlayerIndex;
-        }
-        public static IEnumerator SendSettingsToNewPlayerDelayed()
-        {
-            yield return new WaitForSeconds(0.5f);
-            if (minimapGUI != null && minimapGUI.hostOverride)
-            {
-                minimapGUI.SendHostSettingsToClients();
-            }
         }
     }
 }

@@ -26,29 +26,8 @@ namespace LethalCompanyMinimap.Patches
         [HarmonyPostfix]
         static void DisplayMinimapPatch()
         {
-            // Check for updates
-            string message = null;
-            if (VersionChecker.latestVersion == null)
-            {
-                message = "<color=red>Failed to check for latest version</color>";
-            }
-            else if (new Version(MinimapMod.modVersion) < new Version(VersionChecker.latestVersion))
-            {
-                message = $"<color=white>There is a new version available: </color><color=green>{VersionChecker.latestVersion}</color>";
-            }
-            if (message != null)
-            {
-                HUDManagerPatch.SendClientMessage(message);
-            }
-
             if (MinimapMod.minimapGUI == null) return;
-
-            bool isHost = StartOfRound.Instance != null && StartOfRound.Instance.IsHost;
-            if (isHost && MinimapMod.minimapGUI.hostOverride)
-            {
-                // Small delay to ensure player is fully connected
-                MinimapMod.Instance.StartCoroutine(MinimapMod.SendSettingsToNewPlayerDelayed());
-            }
+            HUDManagerPatch.RegisterAndRequest();
 
             // Get the Minimap size from the settings
             int size = MinimapMod.minimapGUI.minimapSize;
@@ -99,10 +78,6 @@ namespace LethalCompanyMinimap.Patches
                 tooltipsOriginalPos = tooltips.anchoredPosition;
             }
             tooltips.anchoredPosition -= new Vector2(0, size);
-
-            // Request Minimap Version and sharing our own Minimap Version
-            HUDManagerPatch.SendMinimapBroadcast("VersionReq");
-            HUDManagerPatch.SendMinimapBroadcast("VersionResp", MinimapMod.modVersion);
         }
 
         [HarmonyPatch("Update")]

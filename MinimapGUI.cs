@@ -439,7 +439,7 @@ namespace LethalCompanyMinimap.Component
             HUDManagerPatch.SendMinimapBroadcast("HostOverrideSettings", settingsData);
         }
 
-        private string SerializeToggleSettings()
+        public string SerializeToggleSettings()
         {
             return $"enableMinimap={(enableMinimap ? "show" : "hide")};" +
                    $"loots={(showLoots ? "show" : "hide")};" +

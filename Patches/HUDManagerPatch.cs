@@ -3,99 +3,110 @@
 // Licensed under the GNU Affero General Public License, Version 3
 // ----------------------------------------------------------------------
 
-using GameNetcodeStuff;
 using HarmonyLib;
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
+using Unity.Collections;
+using Unity.Netcode;
 
 namespace LethalCompanyMinimap.Patches
 {
-    [HarmonyPatch(typeof(HUDManager))]
     internal class HUDManagerPatch
     {
-        public static readonly string prefix = $"<color=#00ffffff>[{MinimapMod.modName}]</color> ";
-        public static readonly string prefixForBroadcast = "Tyzeron.Minimap";
-        private static readonly Regex parserRegex = new Regex(@"\A<size=0>" + Regex.Escape(prefixForBroadcast) + @"/([ -~]+)/([ -~]+)/([ -~]+)</size>\z", RegexOptions.Compiled);
-        private static IDictionary<string, string> myBroadcasts = new Dictionary<string, string>();
+        //Declare Strings for clients requesting state, and host sending state.
+        const string RequestMessage = "LethalCompanyMinimap_HostOverrideRequest";
+        const string StateMessage = "LethalCompanyMinimap_HostOverrideState";
+        static bool registered;
 
-        public static void SendClientMessage(string message)
+        //Sends host Overrise Settings or If Disabled via Custom Message Manager
+        public static void SendMinimapBroadcast(string signature, string data = "null", ulong? clientId = null)
         {
-            HUDManager.Instance.AddTextToChatOnServer($"{prefix}{message}");
-        }
-
-        [HarmonyPatch("AddTextMessageServerRpc")]
-        [HarmonyPrefix]
-        static bool DontSendMinimapMessagesPatch(string chatMessage)
-        {
-            // Don't block broadcast messages - they need to go through
-            if (chatMessage.Contains(prefixForBroadcast))
-            {
-                return true; // Allow the message through
-            }
-            
-            if (chatMessage.StartsWith(prefix))
-            {
-                return false;
-            }
-            return true;
-        }
-
-        [HarmonyPatch("AddTextMessageServerRpc")]
-        [HarmonyPostfix]
-        static void ReceiveBroadcastMessagesPatch(string chatMessage)
-        {
-            // Process broadcast messages - this runs on server and should also process locally
-            ProcessBroadcastMessage(chatMessage);
-        }
-
-        // Also patch the method that adds messages to chat on clients
-        [HarmonyPatch("AddChatMessage")]
-        [HarmonyPostfix]
-        static void ReceiveBroadcastMessagesClientPatch(string chatMessage, string nameOfUserWhoTyped, int playerWhoSent, bool dontRepeat)
-        {
-            // Process broadcast messages on clients when chat messages are added
-            ProcessBroadcastMessage(chatMessage);
-        }
-
-        private static void ProcessBroadcastMessage(string chatMessage)
-        {
-            if (string.IsNullOrEmpty(chatMessage) || MinimapMod.minimapGUI == null)
+            var network = NetworkManager.Singleton;
+            if (network == null || network.CustomMessagingManager == null)
                 return;
 
-            // Parse broadcast messages
-            Match match = parserRegex.Match(chatMessage);
-            if (match.Success)
+            string payload = signature + "\n" + data;
+            using (var writer = new FastBufferWriter(FastBufferWriter.GetWriteSize(payload), Allocator.Temp))
             {
-                string clientId = match.Groups[1].Value;
-                string signature = match.Groups[2].Value;
-                string data = match.Groups[3].Value;
-
-                // Handle host override settings
-                if (signature == "HostOverrideSettings")
-                {
-                    MinimapMod.minimapGUI.ApplyHostSettings(data);
-                }
-                // Handle host override disabled
-               else if (signature == "HostOverrideDisabled")
-               {
-                   MinimapMod.minimapGUI.RestoreFromConfig();
-               }
+                writer.WriteValueSafe(payload);
+                //If Client ID is present, will send to that one client, otherwise will send to all players. Used Reliable to ensure delivery if message is dropped
+                if (clientId.HasValue)
+                    network.CustomMessagingManager.SendNamedMessage(StateMessage, clientId.Value, writer, NetworkDelivery.Reliable);
+                else
+                    network.CustomMessagingManager.SendNamedMessageToAll(StateMessage, writer, NetworkDelivery.Reliable);
             }
         }
-
-        public static void SendMinimapBroadcast(string signature, string data = "null")
+        //When a player joins (Host or Player), they subscribe to OnRequest and OnState. A player will send RequestMessage to ServerClientID (Host).
+        public static void RegisterAndRequest()
         {
-            int clientId = (int)GameNetworkManager.Instance.localPlayerController.playerClientId;
-            if (!myBroadcasts.ContainsKey(signature))
+            var network = NetworkManager.Singleton;
+            if (network == null || network.CustomMessagingManager == null)
+                return;
+            //Subscribes and marks registered
+            if (!registered)
             {
-                myBroadcasts.Add(signature, data);
+                network.CustomMessagingManager.RegisterNamedMessageHandler(RequestMessage, OnRequest);
+                network.CustomMessagingManager.RegisterNamedMessageHandler(StateMessage, OnState);
+                registered = true;
             }
-            else
-            {
-                myBroadcasts[signature] = data;
-            }
-            HUDManager.Instance.AddTextToChatOnServer($"<size=0>{prefixForBroadcast}/{clientId}/{signature}/{data}</size>");
-        }
 
+            if (StartOfRound.Instance != null && StartOfRound.Instance.IsHost)
+                return;
+            //Builds and Sends message
+            using (var writer = new FastBufferWriter(sizeof(int), Allocator.Temp))
+            {
+                writer.WriteValueSafe(1);
+                network.CustomMessagingManager.SendNamedMessage(RequestMessage, NetworkManager.ServerClientId, writer, NetworkDelivery.Reliable);
+            }
+        }
+        //Will clear the register so next session you create can subscribe again. Restore From Config will enable the players original settings that they had prior to joining
+        public static void OnDisconnect()
+        {
+            registered = false;
+            if (MinimapMod.minimapGUI != null)
+                MinimapMod.minimapGUI.RestoreFromConfig();
+        }
+        //When host receives, will send the senderID the current state string. If HO is enabled, it will send settings, otherwise just state HO is disabled
+        static void OnRequest(ulong senderId, FastBufferReader reader)
+        {
+            if (StartOfRound.Instance == null || !StartOfRound.Instance.IsHost || MinimapMod.minimapGUI == null)
+                return;
+            //Sends the senderID the current settings or is HO is disabled
+            if (MinimapMod.minimapGUI.hostOverride)
+                SendMinimapBroadcast("HostOverrideSettings", MinimapMod.minimapGUI.SerializeToggleSettings(), senderId);
+            else
+                SendMinimapBroadcast("HostOverrideDisabled", "restore", senderId);
+        }
+        //When client receives settings from host, it will apply the settings, otherwise ensure that their original settings get renabled
+        static void OnState(ulong senderId, FastBufferReader reader)
+        {
+            if (NetworkManager.Singleton == null || senderId != NetworkManager.ServerClientId)
+                return;
+            if (StartOfRound.Instance != null && StartOfRound.Instance.IsHost)
+                return;
+            if (MinimapMod.minimapGUI == null)
+                return;
+
+            reader.ReadValueSafe(out string payload);
+            int split = payload.IndexOf('\n');
+            if (split < 0)
+                return;
+            //Applies the settings, otherwise ensures client settings are restored if host disables the Override
+            string signature = payload.Substring(0, split);
+            string data = payload.Substring(split + 1);
+            if (signature == "HostOverrideSettings")
+                MinimapMod.minimapGUI.ApplyHostSettings(data);
+            else if (signature == "HostOverrideDisabled")
+                MinimapMod.minimapGUI.RestoreFromConfig();
+        }
     }
+    [HarmonyPatch(typeof(GameNetworkManager))]
+        //Ensures that on client disconnect the disconnect process runs to unlock the client settings and restore their original settings. 
+        internal class GameNetworkManagerPatch
+        {
+            [HarmonyPatch("StartDisconnect")]
+            [HarmonyPostfix]
+            static void StartDisconnectPatch()
+            {
+                HUDManagerPatch.OnDisconnect();
+            }
+        }
 }

@@ -68,7 +68,6 @@ mod installed.
 - Toggle visibility of different Minimap icons
     - Loots, Enemies, Turrets, Alived Players, Dead Players, Terminal Codes, 
 Radar Boosters, Ship Arrow, Compass, and the Head Camera
-- Informs if the mod is outdated and a newer version is available
 Host Menu For Overrides and Cheat Compliance
 - Allows the Host to force mini map settings for all people in the lobby
 - Can disable the map, force toggles, and other settings
